@@ -58,12 +58,18 @@ export interface XanoFilterExpression {
     statement: {
       left: { tag: 'col'; operand: string }
       op: FilterOp
-      right: { operand: string }
+      right: { operand: string | boolean }
     }
   }>
 }
 
-function toOperand(op: FilterOp, value: string): string {
+const BOOLEAN_FILTER_FIELDS = new Set(['isFound', 'isPaused', 'pit_status'])
+
+function toOperand(field: string, op: FilterOp, value: string): string | boolean {
+  if (BOOLEAN_FILTER_FIELDS.has(field)) {
+    return value === 'true'
+  }
+
   return op === 'ilike' || op === 'not ilike' ? `%${value}%` : value
 }
 
@@ -75,7 +81,7 @@ export function buildFilterExpression(rows: FilterRow[]): XanoFilterExpression |
       statement: {
         left: { tag: 'col', operand: r.field },
         op: r.op,
-        right: { operand: toOperand(r.op, r.value.trim()) },
+        right: { operand: toOperand(r.field, r.op, r.value.trim()) },
       },
     })),
   }

@@ -22,13 +22,13 @@ export function PolicyHub() {
           <p className="eyebrow">VIPA SWCRM</p>
           <h1>Control Center</h1>
           <p className="subtext hero-text">
-            A sharper internal command surface for policy visibility, billing oversight, and day-to-day
+            A sharper internal command surface for policy visibility, location oversight, and day-to-day
             operations.
           </p>
 
           <div className="hero-tags">
             <span className="hero-tag">Internal ops</span>
-            <span className="hero-tag">Live billing data</span>
+            <span className="hero-tag">Live location data</span>
             <span className="hero-tag">Desktop-ready workflow</span>
           </div>
         </div>
@@ -45,7 +45,7 @@ export function PolicyHub() {
           className={`view-chip ${activeView === 'billing' ? 'active' : ''}`}
           onClick={() => setActiveView('billing')}
         >
-          Billing
+          Locations
         </button>
         <button
           className={`view-chip ${activeView === 'integrations' ? 'active' : ''}`}

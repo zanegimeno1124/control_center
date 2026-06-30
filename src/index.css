@@ -479,6 +479,40 @@ tbody tr:hover {
   min-width: 280px;
 }
 
+.location-status-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid rgba(255, 216, 120, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.location-status-tab {
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0.45rem 0.7rem;
+  white-space: nowrap;
+}
+
+.location-status-tab:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.location-status-tab.active {
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: #241702;
+}
+
 .toggle-card {
   display: inline-flex;
   align-items: center;
@@ -542,7 +576,7 @@ tbody tr:hover {
 }
 
 .billing-table {
-  min-width: 1360px;
+  min-width: 980px;
 }
 
 .billing-table-wrap {
@@ -589,16 +623,19 @@ tbody tr:hover {
   font-size: 0.8rem;
 }
 
+.merged-cell,
 .location-cell,
 .pause-cell {
   display: grid;
   gap: 0.22rem;
 }
 
+.merged-cell strong,
 .location-cell strong {
   font-size: 0.92rem;
 }
 
+.merged-cell-secondary,
 .pause-cell small,
 .mono-cell {
   color: var(--muted);

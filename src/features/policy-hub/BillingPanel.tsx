@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { fetchBillingLocations, pauseBillingLocations } from '../../services/billingService'
 import type {
   BillingLocation,
@@ -11,20 +11,132 @@ import { FILTERABLE_FIELDS, buildFilterExpression } from '../../shared/types/bil
 import { FilterBuilderModal } from './FilterBuilderModal'
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+type LocationStatusView = 'active' | 'paused' | 'deleted' | 'needsAttention'
+type LocationColumn = {
+  key: string
+  label: string
+  sortKey?: BillingSortField
+  render: (item: BillingLocation) => ReactNode
+}
 
-const COLUMNS: Array<{ key: BillingSortField; label: string }> = [
-  { key: 'name', label: 'Location' },
-  { key: 'location_id', label: 'Location ID' },
-  { key: 'email', label: 'Email' },
-  { key: 'account_type', label: 'Account Type' },
-  { key: 'stripe_customerId', label: 'Stripe Customer ID' },
-  { key: 'subscription_plan', label: 'Plan' },
-  { key: 'subscription_status', label: 'Subscription' },
-  { key: 'saas_mode', label: 'SaaS Mode' },
-  { key: 'isPaused', label: 'Paused' },
-  { key: 'agency_name', label: 'Agency' },
-  { key: 'lastUpdated', label: 'Last Updated' },
+const STATUS_VIEWS: Array<{
+  key: LocationStatusView
+  label: string
+  summaryLabel: string
+  footerLabel: string
+  warningOnly?: boolean
+  filters: FilterRow[]
+}> = [
+  {
+    key: 'active',
+    label: 'Active',
+    summaryLabel: 'active locations',
+    footerLabel: 'Active locations',
+    filters: [
+      { id: 'status-active-found', field: 'isFound', op: '==', value: 'true' },
+      { id: 'status-active-paused', field: 'isPaused', op: '==', value: 'false' },
+    ],
+  },
+  {
+    key: 'paused',
+    label: 'Paused',
+    summaryLabel: 'paused locations',
+    footerLabel: 'Paused locations',
+    filters: [{ id: 'status-paused', field: 'isPaused', op: '==', value: 'true' }],
+  },
+  {
+    key: 'deleted',
+    label: 'Deleted',
+    summaryLabel: 'deleted locations',
+    footerLabel: 'Deleted locations',
+    filters: [{ id: 'status-deleted', field: 'isFound', op: '==', value: 'false' }],
+  },
+  {
+    key: 'needsAttention',
+    label: 'Needs Attention',
+    summaryLabel: 'attention items',
+    footerLabel: 'Needs Attention',
+    warningOnly: true,
+    filters: [],
+  },
 ]
+
+const LOCATION_COLUMN: LocationColumn = {
+  key: 'location',
+  label: 'Location',
+  sortKey: 'name',
+  render: (item) => (
+    <MergedCell
+      primary={item.name || 'Unnamed location'}
+      secondary={item.location_id || 'N/A'}
+      secondaryMono
+    />
+  ),
+}
+
+const AGENCY_COLUMN: LocationColumn = {
+  key: 'agency',
+  label: 'Agency',
+  sortKey: 'agency_name',
+  render: (item) => <MergedCell primary={item.agency_name || 'N/A'} secondary={item.account_type || 'N/A'} />,
+}
+
+const PLAN_COLUMN: LocationColumn = {
+  key: 'plan',
+  label: 'Plan',
+  sortKey: 'subscription_plan',
+  render: (item) => (
+    <MergedCell
+      primary={item.subscription_plan || 'Unassigned'}
+      secondary={item.stripe_customerId || 'N/A'}
+      secondaryMono
+    />
+  ),
+}
+
+const SUBSCRIPTION_COLUMN: LocationColumn = {
+  key: 'subscription',
+  label: 'Subscription',
+  sortKey: 'subscription_status',
+  render: (item) => (
+    <span className={`status ${getStatusTone(item.subscription_status)}`}>
+      {item.subscription_status || 'None'}
+    </span>
+  ),
+}
+
+const SAAS_MODE_COLUMN: LocationColumn = {
+  key: 'saasMode',
+  label: 'SaaS Mode',
+  sortKey: 'saas_mode',
+  render: (item) => (
+    <span className={`status ${item.saas_mode === 'activated' ? 'active' : 'pending'}`}>
+      {item.saas_mode || 'None'}
+    </span>
+  ),
+}
+
+const PAUSE_COLUMN: LocationColumn = {
+  key: 'pause',
+  label: 'Paused',
+  sortKey: 'isPaused',
+  render: (item) => (
+    <div className="pause-cell">
+      <span className={`status ${item.isPaused ? 'needs-review' : 'active'}`}>
+        {item.isPaused ? 'Paused' : 'Active'}
+      </span>
+      {item.pause_message && <small>{item.pause_message}</small>}
+    </div>
+  ),
+}
+
+const STANDARD_COLUMNS = [LOCATION_COLUMN, AGENCY_COLUMN, PLAN_COLUMN, SUBSCRIPTION_COLUMN, SAAS_MODE_COLUMN]
+const COLUMNS_BY_STATUS: Record<LocationStatusView, LocationColumn[]> = {
+  active: STANDARD_COLUMNS,
+  paused: [...STANDARD_COLUMNS, PAUSE_COLUMN],
+  deleted: [LOCATION_COLUMN, AGENCY_COLUMN, PLAN_COLUMN],
+  needsAttention: STANDARD_COLUMNS,
+}
 
 const EMPTY_RESPONSE: BillingResponse = {
   itemsReceived: 0,
@@ -43,7 +155,7 @@ export function BillingPanel() {
   const [perPage, setPerPage] = useState(25)
   const [searchInput, setSearchInput] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [warningOnly, setWarningOnly] = useState(false)
+  const [statusView, setStatusView] = useState<LocationStatusView>('active')
   const [sortField, setSortField] = useState<BillingSortField>('lastUpdated')
   const [sortDirection, setSortDirection] = useState<BillingSortDirection>('desc')
   const [response, setResponse] = useState<BillingResponse>(EMPTY_RESPONSE)
@@ -55,6 +167,8 @@ export function BillingPanel() {
   const [refreshNonce, setRefreshNonce] = useState(0)
   const [filterRows, setFilterRows] = useState<FilterRow[]>([])
   const [isFilterOpen, setIsFilterOpen] = useState(false)
+  const activeStatusView = STATUS_VIEWS.find((view) => view.key === statusView) ?? STATUS_VIEWS[0]
+  const activeColumns = COLUMNS_BY_STATUS[statusView]
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -78,9 +192,9 @@ export function BillingPanel() {
             page,
             perPage,
             search: searchTerm || undefined,
-            warningOnly,
+            warningOnly: activeStatusView.warningOnly,
             sort: { [sortField]: sortDirection },
-            filterExpression: buildFilterExpression(filterRows) ?? undefined,
+            filterExpression: buildFilterExpression([...activeStatusView.filters, ...filterRows]) ?? undefined,
           },
           controller.signal,
         )
@@ -91,7 +205,7 @@ export function BillingPanel() {
           return
         }
 
-        setError(err instanceof Error ? err.message : 'Unable to load billing data.')
+        setError(err instanceof Error ? err.message : 'Unable to load locations.')
         setResponse(EMPTY_RESPONSE)
       } finally {
         setIsLoading(false)
@@ -101,7 +215,7 @@ export function BillingPanel() {
     void loadBilling()
 
     return () => controller.abort()
-  }, [filterRows, page, perPage, refreshNonce, searchTerm, sortDirection, sortField, warningOnly])
+  }, [activeStatusView, filterRows, page, perPage, refreshNonce, searchTerm, sortDirection, sortField])
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => response.items.some((item) => item.id === id)))
@@ -124,10 +238,11 @@ export function BillingPanel() {
     setRefreshNonce((current) => current + 1)
   }
 
-  function handleToggleWarning() {
+  function handleStatusViewChange(nextView: LocationStatusView) {
     setPage(1)
+    setSelectedIds([])
     setActionMessage(null)
-    setWarningOnly((current) => !current)
+    setStatusView(nextView)
   }
 
   function handleToggleRow(id: string) {
@@ -180,26 +295,28 @@ export function BillingPanel() {
       <div className="billing-header-row">
         <div>
           <div className="billing-title-row">
-            <h2>Billing Locations</h2>
+            <h2>Locations</h2>
             <span className="pill">{response.itemsTotal} total</span>
-            {warningOnly && <span className="pill pill-warn">Needs attention</span>}
+            <span className="pill pill-warn">{activeStatusView.label}</span>
           </div>
-          <p className="subtext">Live billing ledger with server-side search, paging, sorting, and warning-mode filtering.</p>
+          <p className="subtext">Live location ledger with server-side search, paging, sorting, and status filtering.</p>
         </div>
 
         <div className="billing-controls">
-          <label className="toggle-card">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={warningOnly}
-              className={`toggle-switch ${warningOnly ? 'on' : ''}`}
-              onClick={handleToggleWarning}
-            >
-              <span className="toggle-thumb" />
-            </button>
-            <span>Needs Attention</span>
-          </label>
+          <div className="location-status-tabs" role="tablist" aria-label="Location status">
+            {STATUS_VIEWS.map((view) => (
+              <button
+                key={view.key}
+                type="button"
+                role="tab"
+                aria-selected={view.key === statusView}
+                className={`location-status-tab ${view.key === statusView ? 'active' : ''}`}
+                onClick={() => handleStatusViewChange(view.key)}
+              >
+                {view.label}
+              </button>
+            ))}
+          </div>
 
           <input
             type="text"
@@ -242,7 +359,7 @@ export function BillingPanel() {
         <div className="bulk-actions-panel">
           <div className="bulk-actions-copy">
             <span className="pill pill-dark">{selectedCount} selected</span>
-            <span>Bulk actions apply to the selected billing rows.</span>
+            <span>Bulk actions apply to the selected location rows.</span>
           </div>
 
           <div className="bulk-actions-controls">
@@ -260,7 +377,7 @@ export function BillingPanel() {
 
       <div className="billing-summary-row">
         <span>
-          Showing {showingFrom}-{showingTo} of {response.itemsTotal} {warningOnly ? 'attention items' : 'billing locations'}
+          Showing {showingFrom}-{showingTo} of {response.itemsTotal} {activeStatusView.summaryLabel}
         </span>
         <span>
           Page {response.curPage} of {response.pageTotal}
@@ -284,12 +401,12 @@ export function BillingPanel() {
                   />
                 </label>
               </th>
-              {COLUMNS.map((column) => (
+              {activeColumns.map((column) => (
                 <th key={column.key}>
-                  <button className="sort-button" onClick={() => handleSort(column.key)}>
+                  <button className="sort-button" onClick={() => handleSort(column.sortKey ?? 'lastUpdated')}>
                     <span>{column.label}</span>
                     <span className="sort-indicator">
-                      {sortField === column.key ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                      {sortField === column.sortKey ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
                     </span>
                   </button>
                 </th>
@@ -299,13 +416,13 @@ export function BillingPanel() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={COLUMNS.length + 1}>Loading billing locations...</td>
+                <td colSpan={activeColumns.length + 1}>Loading locations...</td>
               </tr>
             )}
 
             {!isLoading && response.items.length === 0 && (
               <tr>
-                <td colSpan={COLUMNS.length + 1}>No records matched the current filters.</td>
+                <td colSpan={activeColumns.length + 1}>No locations matched the current filters.</td>
               </tr>
             )}
 
@@ -313,6 +430,7 @@ export function BillingPanel() {
               <BillingRow
                 key={item.id}
                 item={item}
+                columns={activeColumns}
                 checked={selectedIds.includes(item.id)}
                 disabled={isPausing}
                 onToggle={handleToggleRow}
@@ -324,7 +442,7 @@ export function BillingPanel() {
 
       <div className="billing-footer-row">
         <p className="footer-note">
-          {warningOnly ? 'Needs Attention mode. ' : 'All billing locations. '}
+          {activeStatusView.footerLabel}.{' '}
           {searchTerm ? `Filtered by "${searchTerm}". ` : ''}
           Sorted by {getColumnLabel(sortField)} ({sortDirection}) via API.
         </p>
@@ -366,11 +484,13 @@ export function BillingPanel() {
 
 function BillingRow({
   item,
+  columns,
   checked,
   disabled,
   onToggle,
 }: {
   item: BillingLocation
+  columns: LocationColumn[]
   checked: boolean
   disabled: boolean
   onToggle: (id: string) => void
@@ -388,31 +508,27 @@ function BillingRow({
           />
         </label>
       </td>
-      <td>
-        <div className="location-cell">
-          <strong>{item.name || 'Unnamed location'}</strong>
-        </div>
-      </td>
-      <td className="mono-cell">{item.location_id || 'N/A'}</td>
-      <td>{item.email || 'N/A'}</td>
-      <td>{item.account_type || 'N/A'}</td>
-      <td className="mono-cell">{item.stripe_customerId || 'N/A'}</td>
-      <td>{item.subscription_plan || 'Unassigned'}</td>
-      <td>
-        <span className={`status ${getStatusTone(item.subscription_status)}`}>{item.subscription_status || 'None'}</span>
-      </td>
-      <td>
-        <span className={`status ${item.saas_mode === 'activated' ? 'active' : 'pending'}`}>{item.saas_mode || 'None'}</span>
-      </td>
-      <td>
-        <div className="pause-cell">
-          <span className={`status ${item.isPaused ? 'needs-review' : 'active'}`}>{item.isPaused ? 'Paused' : 'Active'}</span>
-          {item.pause_message && <small>{item.pause_message}</small>}
-        </div>
-      </td>
-      <td>{item.agency_name || 'N/A'}</td>
-      <td>{formatTimestamp(item.lastUpdated)}</td>
+      {columns.map((column) => (
+        <td key={column.key}>{column.render(item)}</td>
+      ))}
     </tr>
+  )
+}
+
+function MergedCell({
+  primary,
+  secondary,
+  secondaryMono = false,
+}: {
+  primary: ReactNode
+  secondary: ReactNode
+  secondaryMono?: boolean
+}) {
+  return (
+    <div className="merged-cell">
+      <strong>{primary}</strong>
+      <span className={secondaryMono ? 'merged-cell-secondary mono-cell' : 'merged-cell-secondary'}>{secondary}</span>
+    </div>
   )
 }
 
@@ -429,27 +545,21 @@ function getVisiblePages(currentPage: number, pageTotal: number) {
 }
 
 function getColumnLabel(column: BillingSortField) {
-  return COLUMNS.find((entry) => entry.key === column)?.label ?? column
-}
-
-function formatTimestamp(value: number) {
-  if (!value) {
-    return 'N/A'
+  const sortLabels: Record<BillingSortField, string> = {
+    name: 'Location',
+    location_id: 'Location ID',
+    email: 'Email',
+    account_type: 'Account Type',
+    stripe_customerId: 'Stripe Customer ID',
+    subscription_plan: 'Plan',
+    subscription_status: 'Subscription',
+    saas_mode: 'SaaS Mode',
+    isPaused: 'Paused',
+    agency_name: 'Agency',
+    lastUpdated: 'Last Updated',
   }
 
-  const date = new Date(Number(value))
-
-  if (Number.isNaN(date.getTime())) {
-    return 'N/A'
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
+  return sortLabels[column] ?? column
 }
 
 function getStatusTone(value: string | null) {
